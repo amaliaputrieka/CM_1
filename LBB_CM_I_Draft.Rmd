@@ -1,0 +1,231 @@
+---
+title: "Channel Classification"
+author: "Amalia Purieka"
+date: "2/9/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Background
+
+We have 'wholesale' data set and we need to classify the 'channel' of each products in order to organize the items more properly. In this case, we will clasify ‘channel’ from 'wholesale' data by using and comparing two models from Logistic Regression model and KNN model. By the end of the process, model with better performance will be chosen. 
+
+# Import Library
+
+```{r}
+library(gtools)
+library(gmodels)
+library(ggplot2)
+library(class)
+library(grid)
+library(dplyr)
+library(caret)
+library(GGally)
+```
+
+
+# Data
+
+## Import Data
+
+We read the data that has been provided in data_input folder.
+
+```{r}
+wholesale <- read.csv("data_input/wholesale.csv")
+str(wholesale)
+```
+
+## Data Preprocessing
+
+Converting 'Channel' data into categorical type. Also remove 'Region' data because it will not be used as predictor.
+
+```{r}
+wholesale <- wholesale %>% 
+  mutate(Channel = as.factor(Channel)) %>% 
+  select(-Region)
+```
+
+Check missing data
+
+```{r}
+colSums(is.na(wholesale))
+```
+
+We found no missing data from our data set.
+
+## Exploratory Data
+
+Breakdown the predictor variables.
+
+```{r}
+library(purrr)
+wholesale %>%
+    select_if(is.numeric) %>%
+    map_dbl(sum)
+```
+
+Check the proportion data of 'Channel'
+
+```{r}
+wholesale %>% 
+  group_by(Channel) %>% 
+  summarise(total=n()) %>% 
+  ungroup() %>% 
+  mutate(proportion = total/sum(total)*100) 
+```
+
+The result, Channel 1 has higher proportion from total order. We still can consider to just continue with that proportion as it is.
+
+## Cross validation
+
+To evaluate the model and see its ability to predict new data, we divide the data into two: train data and test data. This process is called `cross-validation`.
+
+```{r}
+sample <- 0.8*nrow(wholesale)
+index <- sample(seq_len(nrow(wholesale)),size = sample)
+
+data_train <- wholesale[index,]
+data_test <- wholesale[-index,]
+```
+
+# Logistic Regression Model
+
+## Fitting Model
+
+Firstly we build a model using all the variables.
+
+```{r, message=FALSE}
+model_w <- glm(formula = Channel ~ . , data = data_train, family = "binomial")
+```
+
+## Model Summary
+
+```{r}
+summary(model_w)
+```
+
+## Prediction
+
+We predict the data using 'model_w' and putting the 'data_test'
+
+```{r}
+pred_lr <- predict(model_w,newdata = data_test,type = "response")
+
+rmarkdown::paged_table(head(as.data.frame(pred_lr),10))
+```
+Having predicted data, we need to determine the class that we are going to use to classify each items.
+
+```{r}
+pred_class <- as.factor(if_else(pred_lr > 0.5, "1", "2"))
+```
+
+Then evaluate the logistic regression model.
+
+```{r}
+# confusion matrix
+eval_lr <- confusionMatrix(data = pred_class, reference = data_test$Channel, 
+    positive = "1")
+eval_lr
+```
+
+# KNN Model
+
+## Cross validation
+
+```{r}
+RNGkind(sample.kind = "Rounding")
+set.seed(100)
+indexknn <- sample(x = nrow(wholesale), size = 0.8*nrow(wholesale)) 
+train_wholesale <- wholesale[indexknn,]
+test_wholesale <- wholesale[-indexknn,]
+```
+
+Check data proportion of data train ('train_wholsale')
+
+```{r}
+prop.table(table(train_wholesale$Channel))
+```
+
+Splitting target variable and predictor variables.
+
+```{r}
+# x data train
+train_x <- train_wholesale %>% 
+   select_if(is.numeric)
+
+# y data train
+train_y <-  train_wholesale %>% 
+   select(Channel)
+
+# x data test
+test_x <- test_wholesale %>% 
+   select_if(is.numeric)
+
+# y data test
+test_y <- test_wholesale %>% 
+   select(Channel)
+```
+
+## Scaling information of the data.
+
+```{r}
+# scaling x data train
+train_x <- scale(train_x)
+
+# scaling x data test
+test_x <- scale(test_x, center = attr(train_x,"scaled:center"), 
+                scale = attr(train_x,"scaled:center"))
+```
+
+## Determine the value of K using the square root of the train data
+
+```{r}
+sqrt(nrow(train_wholesale))
+```
+
+## Predict using KNN model
+
+We will predict our KNN model performance using data_test
+
+```{r}
+library(class)
+pred_knn <- knn(train = train_x, test = test_x, cl = train_y$Channel, k = 19)
+head(pred_knn)
+```
+
+Now evaluate KNN model prediction.
+
+```{r}
+library(caret)
+eval_knn <- confusionMatrix(data = pred_knn, reference = test_y$Channel, positive = "1")
+eval_knn
+```
+
+# Model Comparison
+
+Having built the LR and KNN, then we are going to compare both models and observe their performance.
+
+```{r}
+eval_lr_compare <- tibble(Accuracy = eval_lr$overall[1],
+           Recall = eval_lr$byClass[1],
+           Specificity = eval_lr$byClass[2],
+           Precision = eval_lr$byClass[3])
+
+eval_lr_compare
+```
+
+```{r}
+eval_knn_compare <- data_frame(Accuracy = eval_knn$overall[1],
+           Recall = eval_knn$byClass[1],
+           Specificity = eval_knn$byClass[2],
+           Precision = eval_knn$byClass[3])
+
+eval_knn_compare
+```
+
+# Conclusion
+
+To be conclude, from the observation we know that KNN model gives better performance, it has 90.16% precision value. Well we definitely choose the KNN model as our preference model.
